@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 
+	// "github.com/BuddhiLW/crypt/pkg/encrypt"
 	"github.com/rwxrob/bonzai"
 	"github.com/rwxrob/bonzai/cmds/help"
 	"github.com/rwxrob/bonzai/comp"
@@ -200,9 +201,9 @@ Usages:
 		fmt.Println(args)
 
 		// Create QRCode binary (which can be converted in a png etc.) from EncryptDataVar
-		data := vars.Fetch(EncryptEnv, EncryptDataVar, "zoo fall")
-		qrcode, err := CreateQRCodeBytes(data)
-		vars.Data.Set(QRBinEnv, QRBinDataVar)
+		// data := vars.Fetch(EncryptEnv, EncryptDataVar, "zoo fall")
+		// qrcode, err := CreateQRCodeBytes(data)
+		// vars.Data.Set(QRBinDataVar, qrcode)
 
 		switch args[0] {
 		case EmbedCmd.Name:
@@ -213,10 +214,9 @@ Usages:
 }
 
 var EmbedCmd = &bonzai.Cmd{
-	Name: `embed`,
-	// Alias: `bin`,
+	Name:  `embed`,
 	Comp:  comp.Cmds,
-	Short: `dct (Discrete Cosine Transform) embedding`,
+	Short: `DCT (Discrete Cosine Transform) embedding`,
 	Cmds: []*bonzai.Cmd{
 		vars.Cmd.AsHidden(),
 		help.Cmd.AsHidden(),
@@ -226,31 +226,54 @@ var EmbedCmd = &bonzai.Cmd{
 			K: QRBinDataVar,
 			V: `foo`,
 			E: QRBinEnv,
-			S: `binary data representing a qrcode`,
+			S: `binary data representing a QR code`,
 			P: true,
 		},
 		{
 			K: EmbeddedImagePathVar,
-			V: `/tmp/embedded-image.png`,
+			V: `/tmp/embedded-image.jpg`,
 			E: EmbeddedImagePathEnv,
 			S: `path to output: embedded image`,
 			P: true,
 		},
 	},
 	Long: `
-embed data, through DCT method, in an image.
+Embed a QR code as binary data into an image using DCT.
 
 Usages:
 - encrypt text <input> <key> qrcode binary embed <input-image>;
 - encrypt text <input> <key> qrcode binary embed <input-image> <output-image>;
 `,
 	Do: func(x *bonzai.Cmd, args ...string) error {
-		fmt.Println("--- embedding ---")
+		fmt.Println("--- Embedding QR Code into JPEG ---")
 		fmt.Println(args)
-		// switch args[0] {
-		// case EmbedCmd.Name:
-		// 	EmbedCmd.Do(x, args[1:]...)
+
+		// Ensure input image is provided
+		if len(args) < 1 {
+			return fmt.Errorf("missing input image path")
+		}
+		inputImage := args[0]
+
+		qrData := vars.Fetch(EncryptEnv, EncryptDataVar, "zoo fall")
+		// Get QR binary data
+		// qrData := vars.Fetch(QRBinEnv, QRBinDataVar, "default_qr_data")
+		// if qrData == "" {
+		// 	return fmt.Errorf("failed to fetch QR binary data")
 		// }
+
+		// Set output image path
+		outputImage := vars.Fetch(EmbeddedImagePathEnv, EmbeddedImagePathVar, "/tmp/embedded-image.jpg")
+		if len(args) > 1 {
+			outputImage = args[1] // Override output path if provided
+		}
+
+		// Embed QR code into the JPEG using DCT
+		err := EmbedQRCodeInJPEG(inputImage, outputImage, qrData)
+		if err != nil {
+			return fmt.Errorf("failed to embed QR code in JPEG: %w", err)
+		}
+
+		fmt.Println("QR code embedded in:", outputImage)
 		return nil
 	},
 }
