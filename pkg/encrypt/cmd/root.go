@@ -1,7 +1,8 @@
 package cmd
 
 import (
-	"github.com/BuddhiLW/go-encrypt/pkg/encrypt"
+	"github.com/BuddhiLW/crypt/pkg/decrypt"
+	"github.com/BuddhiLW/crypt/pkg/encrypt"
 	"github.com/rwxrob/bonzai"
 	"github.com/rwxrob/bonzai/cmds/help"
 	"github.com/rwxrob/bonzai/comp"
@@ -9,9 +10,14 @@ import (
 )
 
 var RootCmd = &bonzai.Cmd{
-	Name: "encrypt",
-	Long: "A CLI for Steganography using StegHide and Reed-Solomon encoding",
+	Name: "crypt",
+	Long: `
+A CLI for steganography; focused on EAS, QRCode and DCT. Encryption and Decryption flows are supported.
+
+Multiple methods fail to preserver the embbeded information, after even a little compression.
+
+Here, a working "empirical" (opinionated?) workflow that survives heavy compression, is supported and proposed.
+`,
 	Comp: comp.Cmds,
-	Cmds: []*bonzai.Cmd{encrypt.EmbedCmd, encrypt.ExtractCmd, vars.Cmd, help.Cmd},
-	Def:  help.Cmd,
+	Cmds: []*bonzai.Cmd{encrypt.EncryptCmd, decrypt.DecryptCmd, vars.Cmd, help.Cmd},
 }

@@ -1,13 +1,14 @@
-module github.com/BuddhiLW/go-encrypt
+module github.com/BuddhiLW/crypt
 
 go 1.23.5
 
 require (
-	github.com/klauspost/reedsolomon v1.12.4
+	github.com/pixiv/go-libjpeg v0.0.0-20190822045933-3da21a74767d
 	github.com/rwxrob/bonzai v0.56.6
 	github.com/rwxrob/bonzai/cmds/help v0.8.2
 	github.com/rwxrob/bonzai/comp v0.10.0
 	github.com/rwxrob/bonzai/vars v0.12.0
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 )
 
 require (
@@ -19,7 +20,6 @@ require (
 	github.com/charmbracelet/x/ansi v0.6.0 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.8 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
