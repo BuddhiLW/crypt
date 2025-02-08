@@ -13,6 +13,7 @@ import (
 	"github.com/rwxrob/bonzai/cmds/help"
 	"github.com/rwxrob/bonzai/comp"
 	"github.com/rwxrob/bonzai/vars"
+	"github.com/skip2/go-qrcode"
 	// "os"
 	// "os/exec"
 	// "strconv"
@@ -161,6 +162,16 @@ Usages:
 - encrypt text <input> <key> qrcode binary;
 `,
 	Do: func(x *bonzai.Cmd, args ...string) error {
+
+		// default:
+		data := vars.Fetch(EncryptEnv, EncryptDataVar, "zoo fall")
+		// qrcode, err := CreateQRCodeBytes(data)
+		// DOING: generate PNG qrcode
+		err := qrcode.WriteFile(data, qrcode.Highest, 256, "/tmp/qr.png")
+		fmt.Print("Wrote qrcode to /tmp/qr.png")
+		if err != nil {
+			return err
+		}
 
 		switch args[0] {
 		case CreateQRBinaryCmd.Name:
