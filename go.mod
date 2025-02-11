@@ -3,6 +3,7 @@ module github.com/BuddhiLW/crypt
 go 1.23.5
 
 require (
+	github.com/liyue201/goqr v0.0.0-20200803022322-df443203d4ea
 	github.com/pixiv/go-libjpeg v0.0.0-20190822045933-3da21a74767d
 	github.com/rwxrob/bonzai v0.56.6
 	github.com/rwxrob/bonzai/cmds/help v0.8.2

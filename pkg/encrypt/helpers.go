@@ -39,7 +39,8 @@ const (
 
 // EncryptMessage encrypts a message using AES
 func EncryptMessage(secret, key string) (string, error) {
-	block, err := aes.NewCipher([]byte(key))
+	keyBytes := deriveKey([]byte(key), 32)
+	block, err := aes.NewCipher(keyBytes)
 	if err != nil {
 		return "", err
 	}
@@ -58,21 +59,18 @@ func EncryptMessage(secret, key string) (string, error) {
 	return base64.StdEncoding.EncodeToString(finalCipher), nil
 }
 
+// deriveKey ensures the key is always a valid AES key size (AES-256 = 32 bytes)
+func deriveKey(key []byte, length int) []byte {
+	derived := make([]byte, length)
+	copy(derived, key)
+	return derived
+}
+
 var EncryptCmd = &bonzai.Cmd{
 	Name:  "encrypt",
 	Alias: "e",
 	Short: `encrypt information`,
 	Comp:  comp.Cmds,
-	// Vars: bonzai.Vars{
-	// 	{
-	// 		K: EncryptDataVar,
-	// 		V: `foo`,
-	// 		E: EncryptEnv,
-	// 		S: `data to be used and transformed in encryption steps`,
-	// 		P: true,
-	// 		// I: true,
-	// 	},
-	// },
 	Cmds: []*bonzai.Cmd{
 		TextCmd,
 		vars.Cmd.AsHidden(),
