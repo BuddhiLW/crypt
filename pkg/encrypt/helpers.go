@@ -37,26 +37,35 @@ const (
 	EmbeddedImagePathVar = `embedded-image-path`
 )
 
-// EncryptMessage encrypts a message using AES
+// **🔹 Encrypt AES (Ensure Output is Correct)**
 func EncryptMessage(secret, key string) (string, error) {
 	keyBytes := deriveKey([]byte(key), 32)
+
 	block, err := aes.NewCipher(keyBytes)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create AES cipher: %w", err)
 	}
+
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create GCM: %w", err)
 	}
 
 	nonce := make([]byte, aesGCM.NonceSize())
 	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
 	ciphertext := aesGCM.Seal(nil, nonce, []byte(secret), nil)
 	finalCipher := append(nonce, ciphertext...)
-	return base64.StdEncoding.EncodeToString(finalCipher), nil
+
+	// Encode to Base64
+	base64Cipher := base64.StdEncoding.EncodeToString(finalCipher)
+
+	// Debug: Print the base64 result
+	fmt.Println("🔐 Encrypted Base64 Output:", base64Cipher)
+
+	return base64Cipher, nil
 }
 
 // deriveKey ensures the key is always a valid AES key size (AES-256 = 32 bytes)

@@ -8,32 +8,64 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"strings"
 
 	"github.com/liyue201/goqr"
 	"github.com/rwxrob/bonzai"
-	// "github.com/skip2/go-qrcode"
+	"github.com/rwxrob/bonzai/cmds/help"
+	"github.com/rwxrob/bonzai/comp"
+	"github.com/rwxrob/bonzai/vars"
 )
 
+const (
+	DecryptEnv     = `DECRYPT_ENV`
+	DecryptDataVar = `decrypted-data`
+	DefaultQRPath  = `/tmp/extracted_qr.png`
+)
+
+// **🔹 Main Decrypt Command**
 var DecryptCmd = &bonzai.Cmd{
 	Name:  "decrypt",
-	Alias: "e",
-	Short: "decrypt image with embedded qrcode",
+	Alias: "d",
+	Short: "decrypt embedded QR Code from an image",
+	Comp:  comp.Cmds,
 	Cmds: []*bonzai.Cmd{
 		ImageCmd,
+		vars.Cmd.AsHidden(),
+		help.Cmd.AsHidden(),
 	},
 }
 
+// **🔹 Decrypt Image Command**
 var ImageCmd = &bonzai.Cmd{
 	Name:  "image",
 	Alias: "i",
-	Short: "decrypt QR Code from an Image",
-	Do: func(_ *bonzai.Cmd, args ...string) error {
-		if len(args) < 2 {
-			return fmt.Errorf("usage: decrypt image <input> <output-qrcode>")
+	Short: "extract QR Code from an image",
+	Comp:  comp.Cmds,
+	Cmds: []*bonzai.Cmd{
+		ExtractCmd,
+		vars.Cmd.AsHidden(),
+		help.Cmd.AsHidden(),
+	},
+	Vars: bonzai.Vars{
+		{
+			K: DecryptDataVar,
+			V: `foo`,
+			E: DecryptEnv,
+			S: `decrypted data extracted from an image`,
+			P: true,
+		},
+	},
+	Do: func(x *bonzai.Cmd, args ...string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: decrypt image <input-image> [<output-qrcode>, defaults to /tmp/extracted_qr.png]")
 		}
 
 		inputImage := args[0]
-		outputQR := args[1]
+		outputQR := DefaultQRPath
+		if len(args) > 1 && args[1] != ExtractCmd.Name {
+			outputQR = args[1] // Override default output if provided
+		}
 
 		fmt.Println("Extracting QR code from image:", inputImage)
 
@@ -45,87 +77,154 @@ var ImageCmd = &bonzai.Cmd{
 
 		fmt.Println("Extracted QR Code saved to:", outputQR)
 
-		// **Step 2: Read QR Code from extracted image**
+		if args[1] == ExtractCmd.Name {
+			// **Step 2: Decrypt Text from QR Code**
+			return ExtractCmd.Do(ExtractCmd, args[2:]...)
+		}
+
+		if args[2] == ExtractCmd.Name {
+			// **Step 2: Decrypt Text from QR Code**
+			return ExtractCmd.Do(ExtractCmd, args[3:]...)
+		}
+
+		return nil
+	},
+}
+
+// **🔹 Extract Command for Decrypting Text**
+var ExtractCmd = &bonzai.Cmd{
+	Name:  "extract",
+	Alias: "x",
+	Short: "decrypt text from extracted QR code",
+	Comp:  comp.Cmds,
+	Cmds: []*bonzai.Cmd{
+		TextCmd,
+		vars.Cmd.AsHidden(),
+		help.Cmd.AsHidden(),
+	},
+	Do: func(x *bonzai.Cmd, args ...string) error {
+		// Ensure at least one argument is provided (the decryption key)
+		if len(args) < 2 {
+			fmt.Println("error: provide a password (key) to be used to decrypt the message.")
+			return fmt.Errorf("usage: decrypt image <input> [<output>] extract text <key>")
+		}
+
+		if args[0] == TextCmd.Name {
+			return TextCmd.Do(TextCmd, args[1:]...)
+		}
+		return nil
+	},
+}
+
+// **🔹 Extract Text Command**
+var TextCmd = &bonzai.Cmd{
+	Name:  "text",
+	Alias: "t",
+	Short: "decrypt text using AES",
+	Do: func(x *bonzai.Cmd, args ...string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: decrypt image <input> [<output>] extract text <key>")
+		}
+
+		key := args[0]
+		fmt.Println("key", key)
+		outputQR := DefaultQRPath // Use default unless overridden
+
+		// Read the QR Code
 		qrText, err := ReadQRCode(outputQR)
 		if err != nil {
 			return fmt.Errorf("failed to read QR code: %w", err)
 		}
 
-		fmt.Println("Decoded QR Code Content:", qrText)
+		// Debugging: Print extracted QR code content
+		fmt.Println("🛠️ Extracted QR Code (Base64):", qrText)
 
-		// **Step 3 (Optional): Decrypt the extracted text**
-		decryptedText, err := DecryptAES(qrText, "mysecurepassword")
+		// **Decrypt the extracted text**
+		decryptedText, err := DecryptAES(qrText, key)
 		if err != nil {
 			return fmt.Errorf("failed to decrypt text: %w", err)
 		}
+
+		// Cache decrypted text
+		vars.Data.Set(DecryptDataVar, decryptedText)
 		fmt.Println("Decrypted Text:", decryptedText)
 
 		return nil
 	},
 }
 
-// ReadQRCode reads the text from a QR Code image
+// **🔹 Read QR Code from Image (Fix Base64 Formatting)**
 func ReadQRCode(filePath string) (string, error) {
-	// Open QR code image
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open QR image: %w", err)
 	}
 	defer file.Close()
 
-	// Decode the image
 	img, _, err := image.Decode(file)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode image: %w", err)
 	}
 
-	// Decode QR code
 	qrCodes, err := goqr.Recognize(img)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode QR: %w", err)
 	}
 
-	// Return the first QR code found
 	if len(qrCodes) > 0 {
-		return string(qrCodes[0].Payload), nil
+		decodedString := string(qrCodes[0].Payload)
+
+		// **Ensure proper Base64 formatting**
+		cleanedString := normalizeBase64(decodedString)
+
+		return cleanedString, nil
 	}
 
 	return "", fmt.Errorf("no QR code found in image")
 }
 
-// DecryptAES decrypts a Base64-encoded AES-GCM ciphertext using the provided key.
+// **🔹 Normalize Base64 to Ensure Correct Padding**
+func normalizeBase64(encoded string) string {
+	// Remove unwanted characters
+	encoded = strings.TrimSpace(encoded)
+	encoded = strings.ReplaceAll(encoded, "\n", "")
+	encoded = strings.ReplaceAll(encoded, "\r", "")
+
+	// Ensure proper Base64 padding
+	missingPadding := len(encoded) % 4
+	if missingPadding > 0 {
+		encoded += strings.Repeat("=", 4-missingPadding)
+	}
+
+	return encoded
+}
+
+// **🔹 Decrypt AES (Reversible from Encrypt)**
 func DecryptAES(encryptedBase64, key string) (string, error) {
-	// Decode Base64 input
 	ciphertext, err := base64.StdEncoding.DecodeString(encryptedBase64)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode base64: %w", err)
 	}
 
-	// Convert key to 32 bytes (AES-256)
 	keyBytes := deriveKey([]byte(key), 32)
 
-	// Ensure ciphertext is large enough to contain nonce
 	if len(ciphertext) < 12 {
 		return "", errors.New("invalid ciphertext: too short")
 	}
 
-	// Extract nonce (first 12 bytes) and encrypted message
 	nonce := ciphertext[:12]
 	ciphertext = ciphertext[12:]
 
-	// Create AES cipher block
 	block, err := aes.NewCipher(keyBytes)
 	if err != nil {
 		return "", fmt.Errorf("failed to create AES cipher: %w", err)
 	}
 
-	// Create GCM cipher
 	aesGCM, err := cipher.NewGCM(block)
 	if err != nil {
 		return "", fmt.Errorf("failed to create GCM cipher: %w", err)
 	}
 
-	// Decrypt the message
 	plaintext, err := aesGCM.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return "", fmt.Errorf("decryption failed: %w", err)
@@ -134,7 +233,7 @@ func DecryptAES(encryptedBase64, key string) (string, error) {
 	return string(plaintext), nil
 }
 
-// deriveKey ensures the key is the required size (AES-256 = 32 bytes)
+// **🔹 Ensures Key is Always 32 Bytes**
 func deriveKey(key []byte, length int) []byte {
 	derived := make([]byte, length)
 	copy(derived, key)
