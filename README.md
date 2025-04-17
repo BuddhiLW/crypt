@@ -9,30 +9,32 @@ A library for Steganography workflows. AES, QRCode, DCT embedding and extraction
 ## Example workflow:
 
 ``` mermaid
-flowchart LR
-    %% ─── shared node so both subgraphs can see it ─────────
-    stego((Stego JPEG)):::carrier
-
-    %% ─── HIDE PIPELINE ────────────────────────────────────
-    subgraph "HIDE (crypt encrypt … embed)"
+flowchart TB
+    %% ── 1st ROW ────────────────────────────────────────
+    subgraph HIDE["HIDE  (crypt encrypt … embed)"]
+        direction LR
         plaintext["Plain text"] -->|AES‑256‑GCM| cipher
-        cipher["Cipher‑text"] -->|base64| b64
+        cipher -->|base64| b64
         b64 -->|"QR encode"| qr
-        qr["QR PNG"] -->|"binary bits"| bits
+        qr -->|"binary bits"| bits
         bits -->|"DCT embed"| stego
     end
 
-    %% ─── REVEAL PIPELINE ──────────────────────────────────
-    subgraph "REVEAL (crypt decrypt)"
-        stego -->|"Extract DCT"| bits2
-        bits2 -->|"QR decode"| qr2
-        qr2["QR PNG"] -->|base64| b642
+    %% ── 2nd ROW ────────────────────────────────────────
+    subgraph REVEAL["REVEAL  (crypt decrypt)"]
+        direction LR
+        extract["Extract DCT"] -->|"QR decode"| qr2
+        qr2 -->|base64| b642
         b642 -->|AES‑256‑GCM| plain2
         plain2["Plain text"]
     end
 
-    %% ─── OPTIONAL STYLES ──────────────────────────────────
+    %% ── CROSS‑ROW LINK ─────────────────────────────────
+    stego --> extract
+
+    %% optional styling for the carrier JPEG
     classDef carrier fill:#ffd5b3,stroke:#e49a46,stroke-width:1.5px,color:#000;
+    class stego carrier;
 ```
 
 ``` bash
