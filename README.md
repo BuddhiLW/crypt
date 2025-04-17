@@ -10,36 +10,29 @@ A library for Steganography workflows. AES, QRCode, DCT embedding and extraction
 
 ``` mermaid
 flowchart LR
-  %% ─── HIDE PIPELINE ──────────────────────────────────────
-  subgraph HIDE • command `crypt encrypt … embed`
-    plaintext["Plain text<br>📝"] --> |
-      "AES‑256‑GCM<br>(key = KDF(password))" | cipher
-    cipher["Cipher‑text<br>🔐"] --> |
-      "base64" | b64
-    b64 --> |
-      "make QR code<br>png" | qr
-    qr["QR code PNG<br>🀄"] --> |
-      "binary bits" | bits
-    bits["0101…"] --> |
-      "embed into<br>DCT coeffs" | dct
-    dct["Stego JPEG<br>🖼️"]:::carrier
-  end
+    %% ─── shared node so both subgraphs can see it ─────────
+    stego((Stego JPEG)):::carrier
 
-  %% ─── REVEAL PIPELINE ───────────────────────────────────
-  subgraph REVEAL • command `crypt decrypt`
-    dct --> |
-      "extract DCT<br>coeffs" | bits2
-    bits2["0101…"] --> |
-      "QR decode" | qr2
-    qr2["QR code PNG"] --> |
-      "base64" | b642
-    b642 --> |
-      "AES‑256‑GCM<br>decrypt" | plain2
-    plain2["Plain text<br>📝"]
-  end
+    %% ─── HIDE PIPELINE ────────────────────────────────────
+    subgraph "HIDE (crypt encrypt … embed)"
+        plaintext["Plain text"] -->|AES‑256‑GCM| cipher
+        cipher["Cipher‑text"] -->|base64| b64
+        b64 -->|"QR encode"| qr
+        qr["QR PNG"] -->|"binary bits"| bits
+        bits -->|"DCT embed"| stego
+    end
 
-  %% ─── STYLES ─────────────────────────────────────────────
-  classDef carrier fill:#ffd5b3,stroke:#e49a46,stroke-width:1.5px,color:#000;
+    %% ─── REVEAL PIPELINE ──────────────────────────────────
+    subgraph "REVEAL (crypt decrypt)"
+        stego -->|"Extract DCT"| bits2
+        bits2 -->|"QR decode"| qr2
+        qr2["QR PNG"] -->|base64| b642
+        b642 -->|AES‑256‑GCM| plain2
+        plain2["Plain text"]
+    end
+
+    %% ─── OPTIONAL STYLES ──────────────────────────────────
+    classDef carrier fill:#ffd5b3,stroke:#e49a46,stroke-width:1.5px,color:#000;
 ```
 
 ``` bash
