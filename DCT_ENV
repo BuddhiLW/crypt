@@ -1,0 +1,3 @@
+DIRECT_DCT_META=direct_dct:13372:ea03c009
+dct-strategy=single-coefficient
+qr-size=192
