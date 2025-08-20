@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/BuddhiLW/crypt/pkg/encrypt"
 	"github.com/liyue201/goqr"
 	"github.com/rwxrob/bonzai"
 	"github.com/rwxrob/bonzai/cmds/help"
@@ -31,6 +32,7 @@ var DecryptCmd = &bonzai.Cmd{
 	Comp:  comp.Cmds,
 	Cmds: []*bonzai.Cmd{
 		ImageCmd,
+		DirectCmd,
 		vars.Cmd.AsHidden(),
 		help.Cmd.AsHidden(),
 	},
@@ -231,6 +233,62 @@ func DecryptAES(encryptedBase64, key string) (string, error) {
 	}
 
 	return string(plaintext), nil
+}
+
+// **🔹 Direct DCT Decryption Command**
+var DirectCmd = &bonzai.Cmd{
+	Name:  "direct",
+	Short: "extract and decrypt data from DCT coefficients",
+	Comp:  comp.Cmds,
+	Cmds: []*bonzai.Cmd{
+		vars.Cmd.AsHidden(),
+		help.Cmd.AsHidden(),
+	},
+	Long: `
+Extract and decrypt data that was embedded directly into JPEG DCT coefficients 
+without QR code overhead (high capacity method).
+
+Usage: decrypt direct <image> <key>
+`,
+	Do: func(x *bonzai.Cmd, args ...string) error {
+		fmt.Println("--- Direct DCT Extraction & Decryption ---")
+
+		if len(args) < 2 {
+			return fmt.Errorf("usage: direct <image> <key>")
+		}
+
+		imagePath := args[0]
+		key := args[1]
+
+		if len(key) < 16 {
+			return fmt.Errorf("key (password) must be greater or equal to 16 characters")
+		}
+
+		// Extract encrypted data directly from DCT coefficients
+		fmt.Printf("Extracting data from: %s\n", imagePath)
+		encryptedData, err := encrypt.ExtractDataDirectlyFromDCT(imagePath)
+		if err != nil {
+			return fmt.Errorf("direct DCT extraction failed: %w", err)
+		}
+
+		fmt.Printf("Extracted %d bytes of encrypted data\n", len(encryptedData))
+
+		// Decrypt the extracted data
+		decryptedData, err := DecryptAES(encryptedData, key)
+		if err != nil {
+			return fmt.Errorf("decryption failed: %w", err)
+		}
+
+		fmt.Printf("Successfully decrypted %d bytes\n", len(decryptedData))
+		fmt.Printf("Decrypted data:\n%s\n", decryptedData)
+
+		// Store decrypted data in vars for potential further use
+		if err := vars.Set(DecryptDataVar, decryptedData, DecryptEnv); err != nil {
+			fmt.Printf("Warning: failed to store decrypted data: %v\n", err)
+		}
+
+		return nil
+	},
 }
 
 // **🔹 Ensures Key is Always 32 Bytes**

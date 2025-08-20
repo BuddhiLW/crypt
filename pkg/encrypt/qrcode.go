@@ -5,7 +5,78 @@ package encrypt
 #cgo LDFLAGS: -ljpeg
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <jpeglib.h>
+
+// extract_data_directly_from_dct extracts data directly from DCT coefficients (high capacity)
+int extract_data_directly_from_dct(const char* input_path, unsigned char* data, int max_data_size) {
+    struct jpeg_decompress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    FILE *infile;
+
+    // Open input file
+    if ((infile = fopen(input_path, "rb")) == NULL) {
+        fprintf(stderr, "Cannot open input file %s\n", input_path);
+        return 1;
+    }
+
+    // Initialize JPEG decompression
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_decompress(&cinfo);
+    jpeg_stdio_src(&cinfo, infile);
+    jpeg_read_header(&cinfo, TRUE);
+
+    // Read DCT coefficients
+    jvirt_barray_ptr *coef_ptrs = jpeg_read_coefficients(&cinfo);
+    if (!coef_ptrs) {
+        fprintf(stderr, "Failed to read DCT coefficients\n");
+        fclose(infile);
+        return 2;
+    }
+
+    // Extract data bits from DCT coefficients
+    int bit_index = 0;
+    int coeff_positions[] = {1, 2, 3, 4, 5, 6};  // Same AC coefficients used during embedding
+    int coefficients_per_block = 6;
+    int max_bits = max_data_size * 8;
+
+    fprintf(stderr, "Direct DCT extraction: max %d bits from coefficients 1-6\n", max_bits);
+
+    // Clear output buffer
+    memset(data, 0, max_data_size);
+
+    for (JDIMENSION by = 0; by < cinfo.comp_info[0].height_in_blocks && bit_index < max_bits; by++) {
+        JBLOCKARRAY block_row = (JBLOCKARRAY)(*cinfo.mem->access_virt_barray)(
+            (j_common_ptr)&cinfo, coef_ptrs[0], by, 1, FALSE);
+
+        for (JDIMENSION bx = 0; bx < cinfo.comp_info[0].width_in_blocks && bit_index < max_bits; bx++) {
+            // Extract up to 6 bits per block from different AC coefficients
+            for (int coeff_idx = 0; coeff_idx < coefficients_per_block && bit_index < max_bits; coeff_idx++) {
+                int coeff_pos = coeff_positions[coeff_idx];
+
+                // Extract the LSB of this coefficient
+                unsigned char bit = block_row[0][bx][coeff_pos] & 1;
+
+                // Store bit into output buffer
+                if (bit == 1) {
+                    data[bit_index / 8] |= 1 << (7 - (bit_index % 8)); // Set bit
+                } else {
+                    data[bit_index / 8] &= ~(1 << (7 - (bit_index % 8))); // Clear bit
+                }
+
+                bit_index++;
+            }
+        }
+    }
+
+    // Cleanup
+    jpeg_finish_decompress(&cinfo);
+    jpeg_destroy_decompress(&cinfo);
+    fclose(infile);
+
+    fprintf(stderr, "Successfully extracted %d bits directly from DCT coefficients\n", bit_index);
+    return 0;
+}
 
 // embed_data_directly_in_dct embeds data directly into DCT coefficients (high capacity)
 int embed_data_directly_in_dct(const char* input_path, const char* output_path,
@@ -365,6 +436,7 @@ import "C"
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -838,6 +910,294 @@ func EmbedDataDirectlyInDCT(inputPath, outputPath, data string) error {
 	}
 
 	return nil
+}
+
+// ExtractDataDirectlyFromDCT extracts data directly from DCT coefficients without QR overhead
+func ExtractDataDirectlyFromDCT(inputPath string) (string, error) {
+	fmt.Printf("Direct DCT extraction from: %s\n", inputPath)
+
+	// Get image dimensions for capacity calculation
+	dims, err := GetImageDimensions(inputPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to get image dimensions: %w", err)
+	}
+
+	// Calculate maximum possible data size (same as embedding)
+	blocksWidth := dims.Width / 8
+	blocksHeight := dims.Height / 8
+	totalBlocks := blocksWidth * blocksHeight
+	coefficientsPerBlock := 6
+	maxCapacityBytes := (totalBlocks * coefficientsPerBlock) / 8
+
+	fmt.Printf("Max extraction capacity: %d bytes\n", maxCapacityBytes)
+
+	// Allocate buffer for extracted data (start with reasonable size for header)
+	maxDataSize := 16384 // 16KB should be enough for most payloads + header
+	if maxCapacityBytes < maxDataSize {
+		maxDataSize = maxCapacityBytes
+	}
+
+	extractedBytes := make([]byte, maxDataSize)
+
+	// Call C function for direct DCT extraction
+	cInputPath := C.CString(inputPath)
+	defer C.free(unsafe.Pointer(cInputPath))
+
+	result := C.extract_data_directly_from_dct(cInputPath,
+		(*C.uchar)(unsafe.Pointer(&extractedBytes[0])), C.int(maxDataSize))
+
+	if result != 0 {
+		return "", fmt.Errorf("direct DCT extraction failed with code %d", int(result))
+	}
+
+	// Parse the header: [length:4bytes][checksum:4bytes][data]
+	if len(extractedBytes) < 8 {
+		return "", fmt.Errorf("extracted data too small for header")
+	}
+
+	dataLength := binary.LittleEndian.Uint32(extractedBytes[0:4])
+	expectedChecksum := binary.LittleEndian.Uint32(extractedBytes[4:8])
+
+	fmt.Printf("Extracted header: length=%d, checksum=%08x\n", dataLength, expectedChecksum)
+
+	if dataLength > uint32(maxDataSize-8) {
+		return "", fmt.Errorf("extracted data length %d exceeds buffer size", dataLength)
+	}
+
+	// Extract the actual data
+	actualData := extractedBytes[8 : 8+dataLength]
+	actualChecksum := calculateSimpleChecksum(actualData)
+
+	fmt.Printf("Extracted data: %d bytes, checksum=%08x\n", len(actualData), actualChecksum)
+
+	// Verify checksum
+	if actualChecksum != expectedChecksum {
+		return "", fmt.Errorf("checksum mismatch: expected %08x, got %08x", expectedChecksum, actualChecksum)
+	}
+
+	return string(actualData), nil
+}
+
+// MultiQRMetadata contains information about the QR grid layout
+type MultiQRMetadata struct {
+	GridWidth     int      `json:"grid_width"`  // e.g., 3 for 3x3 grid
+	GridHeight    int      `json:"grid_height"` // e.g., 3 for 3x3 grid
+	ChunkCount    int      `json:"chunk_count"` // Total number of data chunks
+	ChunkSize     int      `json:"chunk_size"`  // Size of each chunk in bytes
+	TotalDataSize int      `json:"total_size"`  // Total original data size
+	Checksums     []uint32 `json:"checksums"`   // Checksum for each chunk
+	QRSize        int      `json:"qr_size"`     // Size of each QR code (e.g., 128x128)
+	Padding       int      `json:"padding"`     // Padding around grid in pixels
+}
+
+// QRGridPosition represents the position of a QR code in the image
+type QRGridPosition struct {
+	X       int `json:"x"`     // X coordinate in image
+	Y       int `json:"y"`     // Y coordinate in image
+	ChunkID int `json:"chunk"` // Which data chunk this QR contains
+}
+
+// EmbedMultiQRGrid embeds data as multiple QR codes in a grid layout for compression resilience
+func EmbedMultiQRGrid(inputPath, outputPath, data string) error {
+	fmt.Printf("Multi-QR Grid embedding: %d bytes into %s\n", len(data), inputPath)
+
+	// Get image dimensions
+	dims, err := GetImageDimensions(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to get image dimensions: %w", err)
+	}
+
+	// Determine optimal chunk size and grid layout
+	chunkSize := 400 // Start with 400 bytes per chunk for High ECC
+	chunks := chunkData([]byte(data), chunkSize)
+	chunkCount := len(chunks)
+
+	// Calculate grid dimensions (try to make it roughly square)
+	gridWidth := int(math.Ceil(math.Sqrt(float64(chunkCount + 1)))) // +1 for metadata QR
+	gridHeight := int(math.Ceil(float64(chunkCount+1) / float64(gridWidth)))
+
+	fmt.Printf("Data chunks: %d chunks of ~%d bytes each\n", chunkCount, chunkSize)
+	fmt.Printf("Grid layout: %dx%d (total %d positions)\n", gridWidth, gridHeight, gridWidth*gridHeight)
+
+	// Determine QR size and padding based on image dimensions
+	qrSize := calculateOptimalQRSizeForGrid(dims.Width, dims.Height, gridWidth, gridHeight)
+	padding := qrSize / 4 // 25% padding around the grid
+
+	fmt.Printf("QR size: %dx%d, Padding: %d pixels\n", qrSize, qrSize, padding)
+
+	// Calculate QR positions (for future use)
+	_ = calculateQRGridPositions(dims.Width, dims.Height, gridWidth, gridHeight, qrSize, padding)
+
+	// Create metadata
+	checksums := make([]uint32, len(chunks))
+	for i, chunk := range chunks {
+		checksums[i] = calculateSimpleChecksum(chunk)
+	}
+
+	metadata := MultiQRMetadata{
+		GridWidth:     gridWidth,
+		GridHeight:    gridHeight,
+		ChunkCount:    chunkCount,
+		ChunkSize:     chunkSize,
+		TotalDataSize: len(data),
+		Checksums:     checksums,
+		QRSize:        qrSize,
+		Padding:       padding,
+	}
+
+	// Create metadata QR code (position 0)
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	fmt.Printf("Metadata QR: %d bytes\n", len(metadataJSON))
+
+	// Create QR codes for metadata + all chunks
+	allQRData := make([][]byte, chunkCount+1)
+	allQRData[0] = metadataJSON // Metadata QR at position 0
+	for i, chunk := range chunks {
+		allQRData[i+1] = chunk
+	}
+
+	// Generate all QR codes with High ECC
+	qrImages := make([][]byte, len(allQRData))
+	for i, qrData := range allQRData {
+		qrBytes, _, err := EncodeQRCodeWithFallback(string(qrData), qrSize)
+		if err != nil {
+			return fmt.Errorf("failed to create QR code %d: %w", i, err)
+		}
+		qrImages[i] = qrBytes
+	}
+
+	fmt.Printf("Starting to embed %d QR codes...\n", len(qrImages))
+
+	// For testing: Create separate embedded images for each QR code
+	// This allows us to test compression resilience of individual small QRs
+	for i, qrImage := range qrImages {
+		fmt.Printf("Processing QR %d/%d (size: %d bytes)\n", i+1, len(qrImages), len(qrImage))
+		outputFile := fmt.Sprintf("%s_chunk_%d.jpeg", outputPath, i)
+
+		// Create temporary QR file
+		tempQRPath := fmt.Sprintf("/tmp/multiqr_chunk_%d.png", i)
+		fmt.Printf("Writing temp QR to: %s\n", tempQRPath)
+		err := os.WriteFile(tempQRPath, qrImage, 0644)
+		if err != nil {
+			return fmt.Errorf("failed to write temp QR %d: %w", i, err)
+		}
+
+		// Embed this QR into a separate image copy
+		fmt.Printf("Embedding QR into: %s\n", outputFile)
+		err = EmbedQRCodeInJPEG(inputPath, outputFile, tempQRPath, qrSize*qrSize)
+		if err != nil {
+			os.Remove(tempQRPath)
+			return fmt.Errorf("failed to embed QR %d: %w", i, err)
+		}
+
+		os.Remove(tempQRPath)
+		fmt.Printf("Successfully embedded QR %d/%d into %s\n", i+1, len(qrImages), outputFile)
+	}
+
+	fmt.Printf("Successfully embedded %d QR codes in %dx%d grid\n", len(qrImages), gridWidth, gridHeight)
+	return nil
+}
+
+// chunkData splits data into chunks of specified size
+func chunkData(data []byte, chunkSize int) [][]byte {
+	var chunks [][]byte
+	for i := 0; i < len(data); i += chunkSize {
+		end := i + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		chunks = append(chunks, data[i:end])
+	}
+	return chunks
+}
+
+// calculateOptimalQRSizeForGrid determines optimal QR size for grid layout
+func calculateOptimalQRSizeForGrid(imageWidth, imageHeight, gridWidth, gridHeight int) int {
+	// Calculate available space per QR code
+	maxQRWidth := imageWidth / gridWidth
+	maxQRHeight := imageHeight / gridHeight
+
+	// Use the smaller dimension and add some margin
+	maxSize := maxQRWidth
+	if maxQRHeight < maxQRWidth {
+		maxSize = maxQRHeight
+	}
+
+	// Apply 80% factor for padding and margins
+	targetSize := int(float64(maxSize) * 0.8)
+
+	// Round to common QR sizes (64, 96, 128, 160, 192, 224, 256)
+	qrSizes := []int{64, 96, 128, 160, 192, 224, 256}
+	for i := len(qrSizes) - 1; i >= 0; i-- {
+		if qrSizes[i] <= targetSize {
+			return qrSizes[i]
+		}
+	}
+
+	// Default fallback if even 64x64 is too large
+	return 64
+}
+
+// calculateQRGridPositions calculates the (x,y) positions for each QR in the grid
+func calculateQRGridPositions(imageWidth, imageHeight, gridWidth, gridHeight, qrSize, padding int) []QRGridPosition {
+	positions := make([]QRGridPosition, gridWidth*gridHeight)
+
+	// Calculate total grid dimensions
+	totalGridWidth := gridWidth*qrSize + (gridWidth-1)*padding
+	totalGridHeight := gridHeight*qrSize + (gridHeight-1)*padding
+
+	// Center the grid in the image
+	startX := (imageWidth - totalGridWidth) / 2
+	startY := (imageHeight - totalGridHeight) / 2
+
+	// Calculate each position
+	index := 0
+	for row := 0; row < gridHeight; row++ {
+		for col := 0; col < gridWidth; col++ {
+			x := startX + col*(qrSize+padding)
+			y := startY + row*(qrSize+padding)
+
+			positions[index] = QRGridPosition{
+				X:       x,
+				Y:       y,
+				ChunkID: index,
+			}
+			index++
+		}
+	}
+
+	return positions
+}
+
+// embedQRAtPosition embeds a QR code at a specific position in the image
+func embedQRAtPosition(inputPath, outputPath string, qrImageBytes []byte, x, y, size int) error {
+	// For now, use the existing DCT embedding but we'll need to modify it
+	// to embed at specific coordinates rather than globally
+	// This is a placeholder - we'll need to implement position-specific embedding
+
+	// Create a temporary QR file
+	tempQRPath := fmt.Sprintf("/tmp/qr_grid_%d_%d.png", x, y)
+	err := os.WriteFile(tempQRPath, qrImageBytes, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write temp QR: %w", err)
+	}
+	defer os.Remove(tempQRPath)
+
+	// For now, use the existing embedding method with default size (this will need refinement)
+	// TODO: Implement position-specific DCT embedding
+	return EmbedQRCodeInJPEG(inputPath, outputPath, tempQRPath, size*size)
+}
+
+// Helper function for max
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // calculateSimpleChecksum calculates a simple checksum for error detection

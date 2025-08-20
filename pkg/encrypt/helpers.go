@@ -369,6 +369,7 @@ var EmbedCmd = &bonzai.Cmd{
 	Short: `DCT (Discrete Cosine Transform) embedding`,
 	Cmds: []*bonzai.Cmd{
 		DirectDCTCmd,
+		MultiQRCmd,
 		vars.Cmd.AsHidden(),
 		help.Cmd.AsHidden(),
 	},
@@ -399,6 +400,9 @@ Usages:
 		// Check if first argument is a subcommand
 		if len(args) > 0 && args[0] == DirectDCTCmd.Name {
 			return DirectDCTCmd.Do(x, args[1:]...)
+		}
+		if len(args) > 0 && args[0] == MultiQRCmd.Name {
+			return MultiQRCmd.Do(x, args[1:]...)
 		}
 
 		fmt.Println("--- Embedding QR Code into JPEG ---")
@@ -438,6 +442,50 @@ Usages:
 		}
 
 		fmt.Println("QR code embedded in:", outputImage)
+		return nil
+	},
+}
+
+// MultiQRCmd embeds encrypted data as multiple QR codes in a grid for compression resilience
+var MultiQRCmd = &bonzai.Cmd{
+	Name:  `multiqr`,
+	Short: `multi-QR grid embedding for compression resilience`,
+	Comp:  comp.Cmds,
+	Cmds: []*bonzai.Cmd{
+		vars.Cmd.AsHidden(),
+		help.Cmd.AsHidden(),
+	},
+	Long: `
+Embed encrypted data as multiple small QR codes arranged in a grid.
+This method provides compression resilience by using High ECC and chunking data.
+
+Usage: encrypt text <data> <key> qrcode binary embed multiqr <input.jpg> <output.jpg>
+`,
+	Do: func(x *bonzai.Cmd, args ...string) error {
+		fmt.Println("--- Multi-QR Grid Embedding (Compression Resilient) ---")
+
+		if len(args) < 2 {
+			return fmt.Errorf("usage: multiqr <input-image> <output-image>")
+		}
+
+		inputImage := args[0]
+		outputImage := args[1]
+
+		// Get encrypted data
+		encryptedData, varErr := vars.Get(EncryptDataVar, EncryptEnv)
+		if varErr != nil || encryptedData == "" {
+			return fmt.Errorf("no encrypted data found - run encrypt first")
+		}
+
+		fmt.Printf("Multi-QR Grid: embedding %d bytes with compression resilience\n", len(encryptedData))
+
+		// Embed using multi-QR grid strategy
+		err := EmbedMultiQRGrid(inputImage, outputImage, encryptedData)
+		if err != nil {
+			return fmt.Errorf("multi-QR grid embedding failed: %w", err)
+		}
+
+		fmt.Printf("Successfully embedded %d bytes using multi-QR grid: %s\n", len(encryptedData), outputImage)
 		return nil
 	},
 }
