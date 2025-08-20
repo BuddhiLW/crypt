@@ -2,7 +2,7 @@
 FROM golang:1.23.5-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git ca-certificates tzdata
+RUN apk add --no-cache git ca-certificates tzdata libjpeg-dev
 
 # Set working directory
 WORKDIR /app
@@ -17,13 +17,13 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o crypt ./cmd/crypt
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o crypt ./cmd/crypt
 
 # Final stage
 FROM alpine:latest
 
 # Install runtime dependencies
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata libjpeg-dev
 
 # Create non-root user
 RUN addgroup -g 1001 -S crypt && \

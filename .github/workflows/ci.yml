@@ -25,6 +25,17 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
+      - name: Install dependencies
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y libjpeg-dev build-essential
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install jpeg
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "Windows dependencies should be handled by the build environment"
+          fi
+
       - name: Run tests
         run: go test -v ./...
 
@@ -52,6 +63,11 @@ jobs:
           go-version: '1.23.5'
           cache: true
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjpeg-dev build-essential
+
       - name: Build for current platform
         run: make build
 
@@ -78,6 +94,11 @@ jobs:
           go-version: '1.23.5'
           cache: true
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjpeg-dev build-essential
+
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v4
         with:
@@ -98,6 +119,11 @@ jobs:
         with:
           go-version: '1.23.5'
           cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjpeg-dev build-essential
 
       - name: Run security check
         run: govulncheck ./...

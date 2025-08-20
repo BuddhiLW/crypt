@@ -88,7 +88,7 @@ create_release() {
     
     print_success "Release $version created successfully!"
     print_status "Binaries are available in the build/ directory"
-    print_status "You can now create a GitHub release with the generated archives"
+    print_status "GoReleaser will automatically create a GitHub release when you push the tag"
 }
 
 # Function to show help

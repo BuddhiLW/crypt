@@ -4,18 +4,12 @@ before:
 
 builds:
   - env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     goos:
       - linux
-      - windows
-      - darwin
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos=darwin
-        goarch=arm64
-        goamd64=v1
     binary: crypt
     main: ./cmd/crypt
     ldflags:
@@ -43,9 +37,6 @@ archives:
     files:
       - README.md
       - LICENSE
-    ignore:
-      - goos=darwin
-        goarch=arm64
 
 checksum:
   name_template: 'checksums.txt'
@@ -63,32 +54,8 @@ changelog:
       - Merge pull request
       - Merge branch
 
-brews:
-  - name: crypt
-    homepage: "https://github.com/BuddhiLW/crypt"
-    description: "A CLI for steganography; focused on EAS, QRCode and DCT"
-    repository:
-      name: homebrew-tap
-      owner: BuddhiLW
-    commit_author:
-      name: goreleaserbot
-      email: goreleaser@carlosbecker.com
-    folder: Formula
-    goarm: "6"
-    test: |
-      system "#{bin}/crypt", "help"
-
-dockers:
-  - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest"
-    dockerfile: Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--platform=linux/arm64"
-    extra_files:
-      - configs/config.example.yaml
+# Note: Homebrew and Docker builds are disabled due to CGO dependencies
+# For cross-platform distribution, use the Makefile or build natively on each platform
 
 release:
   github:
@@ -107,19 +74,5 @@ release:
 
 dist: dist
 
-nfpms:
-  - maintainer: BuddhiLW <your-email@example.com>
-    description: A CLI for steganography; focused on EAS, QRCode and DCT
-    homepage: https://github.com/BuddhiLW/crypt
-    license: MIT
-    formats:
-      - deb
-      - rpm
-    files:
-      README.md: /usr/share/doc/crypt/README.md
-      LICENSE: /usr/share/doc/crypt/LICENSE
-    config_files:
-      configs/config.example.yaml: /etc/crypt/config.yaml
-    empty_folders:
-      - /var/log/crypt
-      - /var/lib/crypt
+# Note: Package builds (deb/rpm) are disabled due to CGO dependencies
+# For package distribution, build natively on each platform

@@ -115,8 +115,19 @@ For reliable cross-platform builds, consider using Docker or building natively o
 
 ### Creating Releases
 
+The project uses GoReleaser for automated releases. When you push a tag, it automatically:
+
+1. Builds binaries for supported platforms
+2. Creates GitHub releases
+3. Generates checksums
+4. Updates changelog
+
 ```bash
 # Create a new release
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+
+# Or use the release script
 ./scripts/release.sh v1.0.0
 
 # Suggest next version
