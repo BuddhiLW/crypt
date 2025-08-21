@@ -69,6 +69,14 @@ func (s *SteganographyService) EmbedQRCode(inputPath, outputPath, data string, s
 		return fmt.Errorf("failed to generate QR code: %w", err)
 	}
 
+	// Debug: Save the generated QR code to a file for inspection
+	debugQRPath := filepath.Join(filepath.Dir(outputPath), "debug_generated_qr.png")
+	if err := os.WriteFile(debugQRPath, qrPNG, 0644); err != nil {
+		fmt.Printf("WARNING: Failed to save debug QR code: %v\n", err)
+	} else {
+		fmt.Printf("DEBUG: Saved generated QR code to %s\n", debugQRPath)
+	}
+
 	// Convert PNG to bitstream
 	bitstream, err := s.qrProcessor.ConvertToBitstream(qrPNG)
 	if err != nil {
@@ -178,13 +186,22 @@ func (s *SteganographyService) EmbedMultiQRWithMetadata(inputPath, outputDir, da
 	metadataPath := filepath.Join(tempDir, "metadata.jpeg")
 	fmt.Printf("DEBUG: Creating metadata file at %s\n", metadataPath)
 
+	// Calculate optimal chunk size and count first
+	// QR code can store ~50-80 characters in 96x96 QR code with high ECC
+	// Use 50 bytes per chunk for safety with 96x96 QR codes
+	maxChunkSize := 50
+	dataLen := len(data)
+	chunkCount := (dataLen + maxChunkSize - 1) / maxChunkSize // Ceiling division
+
+	fmt.Printf("DEBUG: Data length: %d bytes, splitting into %d chunks of max %d bytes each\n", dataLen, chunkCount, maxChunkSize)
+
 	// Create proper metadata structure for multi-QR system
 	metadata := map[string]interface{}{
 		"grid_width":  1,
 		"grid_height": 1,
-		"chunk_count": 1,
-		"chunk_size":  len(data),
-		"total_size":  len(data),
+		"chunk_count": chunkCount,
+		"chunk_size":  maxChunkSize,
+		"total_size":  dataLen,
 		"qr_size":     96,
 		"padding":     24,
 	}
@@ -208,19 +225,23 @@ func (s *SteganographyService) EmbedMultiQRWithMetadata(inputPath, outputDir, da
 	}
 	fmt.Printf("DEBUG: Successfully created metadata file\n")
 
+	// Use the calculated chunk count and sizes
+
 	// Create chunk files in temp directory
-	chunkCount := 1 // For now, create one chunk
 	for i := 0; i < chunkCount; i++ {
 		chunkPath := filepath.Join(tempDir, fmt.Sprintf("chunk_%d.jpeg", i))
-		fmt.Printf("DEBUG: Creating chunk file at %s\n", chunkPath)
+		fmt.Printf("DEBUG: Creating chunk file %d at %s\n", i, chunkPath)
 
-		// Use the actual encrypted data for the chunk (for single chunk, use all data)
-		chunkData := string(data) // Use the actual encrypted data
-		previewLen := 50
-		if len(chunkData) < previewLen {
-			previewLen = len(chunkData)
+		// Calculate chunk boundaries
+		start := i * maxChunkSize
+		end := start + maxChunkSize
+		if end > dataLen {
+			end = dataLen
 		}
-		fmt.Printf("DEBUG: Embedding chunk data length: %d, first %d chars: %s\n", len(chunkData), previewLen, chunkData[:previewLen])
+		chunkData := string(data[start:end])
+
+		fmt.Printf("DEBUG: Chunk %d: bytes %d-%d (length: %d), first 50 chars: %s\n",
+			i, start, end-1, len(chunkData), chunkData[:min(50, len(chunkData))])
 
 		// Store QR size in vars for extraction (use the same env as extraction)
 		if err := vars.Set("qr-size", "96", "DCT_ENV"); err != nil {

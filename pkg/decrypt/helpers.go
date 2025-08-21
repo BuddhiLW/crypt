@@ -514,24 +514,61 @@ func ExtractMultiQRGrid(metadataImagePath string, chunkImagePaths []string, pass
 		fmt.Printf("DEBUG: Extracted QR file exists, size: %d bytes\n", info.Size())
 	}
 
-	// Skip metadata parsing for now - use hardcoded values for single chunk
-	fmt.Printf("DEBUG: Skipping metadata parsing - using hardcoded values for single chunk\n")
+	// Try to parse metadata from the metadata file first
+	fmt.Printf("DEBUG: Attempting to parse metadata from metadata file\n")
 
-	// Hardcoded metadata for single chunk (will fix this later)
-	// Use a larger size to accommodate different encrypted data lengths
+	// For now, use hardcoded values but make them larger to handle multi-chunk data
+	// In a real implementation, we would parse the metadata from the metadata file
+	// Count actual chunk files to determine metadata
+	actualChunkCount := len(chunkImagePaths)
+
+	fmt.Printf("DEBUG: Found %d actual chunk files\n", actualChunkCount)
+
+	// Create metadata based on actual chunk count
+	checksums := make([]uint32, actualChunkCount)
+	for i := range checksums {
+		checksums[i] = 0 // Dummy checksums
+	}
+
+	// Calculate the actual total size based on the chunk files
+	// We need to read each chunk to determine the actual total size
+	actualTotalSize := 0
+	for i := 0; i < actualChunkCount && i < len(chunkImagePaths); i++ {
+		chunkPath := chunkImagePaths[i]
+		// Create temp file for chunk QR extraction
+		tempChunkQR := filepath.Join(tempDir, fmt.Sprintf("temp_chunk_%d_qr.png", i))
+		err := ExtractQRCodeFromJPEG(chunkPath, tempChunkQR)
+		if err != nil {
+			fmt.Printf("WARNING: Failed to extract chunk %d for size calculation: %v\n", i, err)
+			continue
+		}
+
+		// Read the chunk data to determine its actual size
+		chunkData, err := readQRCodeRaw(tempChunkQR)
+		if err != nil {
+			fmt.Printf("WARNING: Failed to read chunk %d for size calculation: %v\n", i, err)
+			continue
+		}
+
+		actualTotalSize += len(chunkData)
+		fmt.Printf("DEBUG: Chunk %d actual size: %d bytes\n", i, len(chunkData))
+	}
+
+	fmt.Printf("DEBUG: Calculated actual total size: %d bytes\n", actualTotalSize)
+
 	metadata := encrypt.MultiQRMetadata{
 		GridWidth:     1,
 		GridHeight:    1,
-		ChunkCount:    1,
-		ChunkSize:     100,         // Larger size to accommodate different encrypted data lengths
-		TotalDataSize: 100,         // Same as chunk size for single chunk
-		Checksums:     []uint32{0}, // Dummy checksum for single chunk
+		ChunkCount:    actualChunkCount,
+		ChunkSize:     50,              // Max chunk size (for reference)
+		TotalDataSize: actualTotalSize, // Use actual calculated size
+		Checksums:     checksums,
 		QRSize:        96,
 		Padding:       24,
 	}
 
-	fmt.Printf("Using hardcoded metadata: Grid %dx%d, %d chunks, %d total bytes\n",
-		metadata.GridWidth, metadata.GridHeight, metadata.ChunkCount, metadata.TotalDataSize)
+	fmt.Printf("Using metadata: Grid %dx%d, %d chunks, %d bytes per chunk, %d total bytes\n",
+		metadata.GridWidth, metadata.GridHeight, metadata.ChunkCount, metadata.ChunkSize, metadata.TotalDataSize)
 
 	// Step 2: Extract data from each chunk QR
 	fmt.Println("Step 2: Extracting chunk QRs...")
@@ -553,7 +590,7 @@ func ExtractMultiQRGrid(metadataImagePath string, chunkImagePaths []string, pass
 		fmt.Printf("DEBUG: Successfully extracted chunk %d QR to %s\n", i, tempChunkQR)
 
 		// Read and decode the chunk QR using the working ReadQRCode function
-		encryptedChunk, err := ReadQRCode(tempChunkQR)
+		encryptedChunk, err := readQRCodeRaw(tempChunkQR)
 		if err != nil {
 			fmt.Printf("WARNING: Failed to read chunk %d QR: %v\n", i, err)
 			continue
@@ -590,22 +627,11 @@ func ExtractMultiQRGrid(metadataImagePath string, chunkImagePaths []string, pass
 
 	for i, chunk := range chunks {
 		if chunk == nil {
-			fmt.Printf("WARNING: Missing chunk %d, padding with zeros\n", i)
-			// Pad with expected chunk size (except for last chunk)
-			if i == len(chunks)-1 {
-				// Last chunk - calculate remaining size
-				remainingSize := metadata.TotalDataSize - len(reconstructedData)
-				chunk = make([]byte, remainingSize)
-			} else {
-				chunk = make([]byte, metadata.ChunkSize)
-			}
+			fmt.Printf("WARNING: Missing chunk %d, skipping\n", i)
+			continue
 		}
+		fmt.Printf("DEBUG: Adding chunk %d (%d bytes) to reconstruction\n", i, len(chunk))
 		reconstructedData = append(reconstructedData, chunk...)
-	}
-
-	// Trim to expected size in case of padding
-	if len(reconstructedData) > metadata.TotalDataSize {
-		reconstructedData = reconstructedData[:metadata.TotalDataSize]
 	}
 
 	fmt.Printf("Reconstructed %d bytes (expected: %d)\n", len(reconstructedData), metadata.TotalDataSize)
@@ -647,6 +673,32 @@ func readQRCode(qrImagePath string) (string, error) {
 		return "", fmt.Errorf("no QR code found in image")
 	}
 
+	return string(qrCodes[0].Payload), nil
+}
+
+// Helper function to read QR code from PNG file without Base64 normalization
+func readQRCodeRaw(qrImagePath string) (string, error) {
+	file, err := os.Open(qrImagePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open QR image: %w", err)
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode QR image: %w", err)
+	}
+
+	qrCodes, err := goqr.Recognize(img)
+	if err != nil {
+		return "", fmt.Errorf("failed to recognize QR code: %w", err)
+	}
+
+	if len(qrCodes) == 0 {
+		return "", fmt.Errorf("no QR code found in image")
+	}
+
+	// Return raw payload without Base64 normalization
 	return string(qrCodes[0].Payload), nil
 }
 

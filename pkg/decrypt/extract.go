@@ -272,8 +272,8 @@ func ConvertBitstreamToQRImage(bitstream []byte, size int) (image.Image, error) 
 	img := image.NewGray(image.Rect(0, 0, size, size))
 	bitIndex := 0
 
-	for y := range size {
-		for x := range size {
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
 			bit := (bitstream[bitIndex/8] >> (7 - (bitIndex % 8))) & 1
 			if bit == 1 {
 				img.SetGray(x, y, color.Gray{Y: 0}) // Black
