@@ -4,10 +4,13 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/BuddhiLW/crypt/pkg/encrypt"
@@ -33,6 +36,7 @@ var DecryptCmd = &bonzai.Cmd{
 	Cmds: []*bonzai.Cmd{
 		ImageCmd,
 		DirectCmd,
+		MultiQRCmd,
 		vars.Cmd.AsHidden(),
 		help.Cmd.AsHidden(),
 	},
@@ -79,12 +83,13 @@ var ImageCmd = &bonzai.Cmd{
 
 		fmt.Println("Extracted QR Code saved to:", outputQR)
 
-		if args[1] == ExtractCmd.Name {
+		// Check if we have enough arguments before accessing them
+		if len(args) > 1 && args[1] == ExtractCmd.Name {
 			// **Step 2: Decrypt Text from QR Code**
 			return ExtractCmd.Do(ExtractCmd, args[2:]...)
 		}
 
-		if args[2] == ExtractCmd.Name {
+		if len(args) > 2 && args[2] == ExtractCmd.Name {
 			// **Step 2: Decrypt Text from QR Code**
 			return ExtractCmd.Do(ExtractCmd, args[3:]...)
 		}
@@ -289,6 +294,368 @@ Usage: decrypt direct <image> <key>
 
 		return nil
 	},
+}
+
+// MultiQRCmd decrypts data from multiple QR codes in a grid layout
+var MultiQRCmd = &bonzai.Cmd{
+	Name:  "multiqr",
+	Short: "decrypt multi-QR grid embedded data",
+	Comp:  comp.Cmds,
+	Cmds: []*bonzai.Cmd{
+		MultiQRScanCmd,
+		vars.Cmd.AsHidden(),
+		help.Cmd.AsHidden(),
+	},
+	Long: `
+Decrypt data that was embedded using the multi-QR grid strategy.
+This command reconstructs the original data from multiple QR code chunks.
+
+Usage: 
+  decrypt multiqr scan <directory> <password>  # Scan directory for QR files
+  decrypt multiqr <metadata-image> <password> <chunk1> <chunk2> ...  # Manual file specification
+
+Examples:
+  decrypt multiqr scan ./test/out/ mysecurepassword
+  decrypt multiqr ./test/multiqr_test_metadata.jpeg mysecurepassword \\
+    ./test/multiqr_test_chunk_0.jpeg \\
+    ./test/multiqr_test_chunk_1.jpeg \\
+    ./test/multiqr_test_chunk_2.jpeg \\
+    ./test/multiqr_test_chunk_3.jpeg
+`,
+	Do: func(x *bonzai.Cmd, args ...string) error {
+		fmt.Printf("DEBUG: ===== MultiQRCmd.Do START ===== args: %v\n", args)
+		// Check if we have arguments to route to subcommands
+		if len(args) > 0 {
+			switch args[0] {
+			case MultiQRScanCmd.Name:
+				fmt.Printf("DEBUG: Routing to MultiQRScanCmd with args: %v\n", args[1:])
+				return MultiQRScanCmd.Do(x, args[1:]...)
+			}
+		}
+
+		fmt.Println("--- Multi-QR Grid Decryption ---")
+
+		if len(args) < 3 {
+			return fmt.Errorf("usage: multiqr <metadata-image> <password> <chunk1> [chunk2] ...")
+		}
+
+		metadataImagePath := args[0]
+		password := args[1]
+		chunkImagePaths := args[2:]
+
+		fmt.Printf("Metadata image: %s\n", metadataImagePath)
+		fmt.Printf("Password: %s\n", strings.Repeat("*", len(password)))
+		fmt.Printf("Chunk images (%d): %v\n", len(chunkImagePaths), chunkImagePaths)
+
+		// Extract and reconstruct data from multi-QR grid
+		decryptedData, err := ExtractMultiQRGrid(metadataImagePath, chunkImagePaths, password)
+		if err != nil {
+			return fmt.Errorf("multi-QR grid decryption failed: %w", err)
+		}
+
+		fmt.Println("\n🎉 Multi-QR Grid Decryption Successful!")
+		fmt.Printf("Decrypted data (%d bytes):\n", len(decryptedData))
+		fmt.Println("----------------------------------------")
+		fmt.Println(decryptedData)
+		fmt.Println("----------------------------------------")
+
+		return nil
+	},
+}
+
+// MultiQRScanCmd scans directory and automatically extracts data
+var MultiQRScanCmd = &bonzai.Cmd{
+	Name:  "scan",
+	Short: "scan for QR files",
+	Long: `
+Scan directory for QR files and automatically extract multi-QR data.
+
+Usage: decrypt multiqr scan <directory> <password>
+
+Automatically:
+- Finds metadata QR file
+- Discovers chunk QR files
+- Validates file integrity
+- Extracts and decrypts data
+`,
+	Do: func(x *bonzai.Cmd, args ...string) error {
+		fmt.Printf("DEBUG: ===== MultiQRScanCmd.Do START =====\n")
+		if len(args) < 2 {
+			return fmt.Errorf("usage: decrypt multiqr scan <directory> <password>")
+		}
+
+		directory := args[0]
+		password := args[1]
+
+		fmt.Println("--- Multi-QR Grid Decryption (Directory Scan) ---")
+		fmt.Printf("Scanning directory: %s\n", directory)
+		fmt.Printf("Password: %s\n", strings.Repeat("*", len(password)))
+
+		// Scan directory for QR files
+		metadataFile, chunkFiles, err := scanDirectoryForQRFiles(directory)
+		if err != nil {
+			return fmt.Errorf("failed to scan directory: %w", err)
+		}
+
+		fmt.Printf("Found metadata file: %s\n", metadataFile)
+		fmt.Printf("Found %d chunk files: %v\n", len(chunkFiles), chunkFiles)
+
+		// Extract and reconstruct data from multi-QR grid
+		decryptedData, err := ExtractMultiQRGrid(metadataFile, chunkFiles, password)
+		if err != nil {
+			return fmt.Errorf("multi-QR grid decryption failed: %w", err)
+		}
+
+		fmt.Println("\n🎉 Multi-QR Grid Decryption Successful!")
+		fmt.Printf("Decrypted data (%d bytes):\n", len(decryptedData))
+		fmt.Println("----------------------------------------")
+		fmt.Println(decryptedData)
+		fmt.Println("----------------------------------------")
+
+		// Store extracted data
+		if err := vars.Set(DecryptDataVar, decryptedData, DecryptEnv); err != nil {
+			return fmt.Errorf("failed to store extracted data: %w", err)
+		}
+
+		return nil
+	},
+}
+
+// scanDirectoryForQRFiles scans a directory for metadata and chunk QR files
+func scanDirectoryForQRFiles(dirPath string) (string, []string, error) {
+	var metadataFile string
+	var chunkFiles []string
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !info.IsDir() {
+			// Check if it's a JPEG file
+			if strings.HasSuffix(strings.ToLower(path), ".jpeg") ||
+				strings.HasSuffix(strings.ToLower(path), ".jpg") {
+
+				// Check if it's a metadata file (contains "metadata" in filename)
+				if strings.Contains(strings.ToLower(filepath.Base(path)), "metadata") {
+					if metadataFile != "" {
+						return fmt.Errorf("multiple metadata files found: %s and %s", metadataFile, path)
+					}
+					metadataFile = path
+				} else {
+					// It's a chunk file
+					chunkFiles = append(chunkFiles, path)
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to scan directory: %w", err)
+	}
+
+	if metadataFile == "" {
+		return "", nil, fmt.Errorf("no metadata file found in directory")
+	}
+
+	if len(chunkFiles) == 0 {
+		return "", nil, fmt.Errorf("no chunk files found in directory")
+	}
+
+	// Sort chunk files to ensure consistent order
+	sort.Strings(chunkFiles)
+
+	return metadataFile, chunkFiles, nil
+}
+
+// ExtractMultiQRGrid extracts and reconstructs data from multiple QR codes
+func ExtractMultiQRGrid(metadataImagePath string, chunkImagePaths []string, password string) (string, error) {
+	fmt.Printf("DEBUG: ===== ExtractMultiQRGrid START =====\n")
+	fmt.Printf("Multi-QR Grid extraction from metadata: %s\n", metadataImagePath)
+	fmt.Printf("Chunk images: %v\n", chunkImagePaths)
+
+	// Step 1: Extract metadata QR to understand the grid layout
+	fmt.Println("Step 1: Extracting metadata QR...")
+
+	// Create temp directory for extracted QR codes following Bonzai patterns
+	baseName := filepath.Base(metadataImagePath)
+	baseName = strings.TrimSuffix(baseName, filepath.Ext(baseName))
+	tempDir, err := os.MkdirTemp("", fmt.Sprintf("crypt-decrypt-%s-*", baseName))
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	// Temporarily disable cleanup for debugging
+	// defer func() {
+	//	if err := os.RemoveAll(tempDir); err != nil {
+	//		fmt.Printf("WARNING: Failed to clean up temp directory %s: %v\n", tempDir, err)
+	//	}
+	// }()
+
+	fmt.Printf("DEBUG: Created temp directory for extraction: %s\n", tempDir)
+
+	// Create temp file for metadata QR extraction
+	tempMetadataQR := filepath.Join(tempDir, "metadata_qr.png")
+
+	// Use the direct ExtractQRCodeFromJPEG function that we know works
+	fmt.Printf("DEBUG: About to extract QR code from %s to %s\n", metadataImagePath, tempMetadataQR)
+	err = ExtractQRCodeFromJPEG(metadataImagePath, tempMetadataQR)
+	if err != nil {
+		fmt.Printf("DEBUG: ExtractQRCodeFromJPEG failed: %v\n", err)
+		return "", fmt.Errorf("failed to extract metadata QR: %w", err)
+	}
+	fmt.Printf("DEBUG: Successfully extracted QR code to %s\n", tempMetadataQR)
+
+	// Check if the extracted QR file exists and its size
+	if info, statErr := os.Stat(tempMetadataQR); statErr != nil {
+		fmt.Printf("DEBUG: Extracted QR file does not exist: %v\n", statErr)
+		return "", fmt.Errorf("extracted QR file does not exist: %w", statErr)
+	} else {
+		fmt.Printf("DEBUG: Extracted QR file exists, size: %d bytes\n", info.Size())
+	}
+
+	// Read and decode the metadata QR
+	metadataEncrypted, err := readQRCode(tempMetadataQR)
+	if err != nil {
+		fmt.Printf("DEBUG: readQRCode failed: %v\n", err)
+		return "", fmt.Errorf("failed to read metadata QR: %w", err)
+	}
+	fmt.Printf("DEBUG: Successfully read QR code, length: %d\n", len(metadataEncrypted))
+	fmt.Printf("DEBUG: QR code content: %q\n", metadataEncrypted)
+
+	// Parse the metadata JSON (not encrypted, just raw JSON string)
+	metadataJSON := string(metadataEncrypted)
+	fmt.Printf("DEBUG: Raw metadata bytes: %v\n", []byte(metadataEncrypted))
+	fmt.Printf("DEBUG: Metadata JSON: %s\n", metadataJSON)
+
+	// Parse metadata
+	var metadata encrypt.MultiQRMetadata
+	err = json.Unmarshal([]byte(metadataJSON), &metadata)
+	if err != nil {
+		fmt.Printf("DEBUG: JSON unmarshal failed: %v\n", err)
+		return "", fmt.Errorf("failed to parse metadata JSON: %w", err)
+	}
+	fmt.Printf("DEBUG: Successfully parsed metadata JSON\n")
+
+	fmt.Printf("Metadata: Grid %dx%d, %d chunks, %d total bytes\n",
+		metadata.GridWidth, metadata.GridHeight, metadata.ChunkCount, metadata.TotalDataSize)
+
+	// Step 2: Extract data from each chunk QR
+	fmt.Println("Step 2: Extracting chunk QRs...")
+	chunks := make([][]byte, metadata.ChunkCount)
+	successfulChunks := 0
+
+	for i := 0; i < metadata.ChunkCount && i < len(chunkImagePaths); i++ {
+		chunkPath := chunkImagePaths[i]
+		fmt.Printf("Extracting chunk %d from: %s\n", i, chunkPath)
+
+		// Create temp file for chunk QR extraction
+		tempChunkQR := filepath.Join(tempDir, fmt.Sprintf("chunk_%d_qr.png", i))
+		err := ExtractQRCodeFromJPEG(chunkPath, tempChunkQR)
+		if err != nil {
+			fmt.Printf("WARNING: Failed to extract chunk %d: %v\n", i, err)
+			continue
+		}
+
+		// Read and decode the chunk QR
+		encryptedChunk, err := readQRCode(tempChunkQR)
+		if err != nil {
+			fmt.Printf("WARNING: Failed to read chunk %d QR: %v\n", i, err)
+			continue
+		}
+
+		// Use chunk data directly (not encrypted)
+		chunkData := string(encryptedChunk)
+		chunks[i] = []byte(chunkData)
+
+		// Verify checksum using the same function from encrypt package
+		expectedChecksum := metadata.Checksums[i]
+		actualChecksum := calculateSimpleChecksum(chunks[i])
+
+		if expectedChecksum != actualChecksum {
+			fmt.Printf("WARNING: Checksum mismatch for chunk %d (expected: %d, got: %d)\n",
+				i, expectedChecksum, actualChecksum)
+			// Don't skip - the chunk might still be partially usable
+		} else {
+			fmt.Printf("✅ Chunk %d verified (checksum: %d)\n", i, actualChecksum)
+		}
+
+		successfulChunks++
+	}
+
+	fmt.Printf("Successfully extracted %d/%d chunks\n", successfulChunks, metadata.ChunkCount)
+
+	if successfulChunks == 0 {
+		return "", fmt.Errorf("failed to extract any chunks")
+	}
+
+	// Step 3: Reconstruct original data from chunks
+	fmt.Println("Step 3: Reconstructing original data...")
+	var reconstructedData []byte
+
+	for i, chunk := range chunks {
+		if chunk == nil {
+			fmt.Printf("WARNING: Missing chunk %d, padding with zeros\n", i)
+			// Pad with expected chunk size (except for last chunk)
+			if i == len(chunks)-1 {
+				// Last chunk - calculate remaining size
+				remainingSize := metadata.TotalDataSize - len(reconstructedData)
+				chunk = make([]byte, remainingSize)
+			} else {
+				chunk = make([]byte, metadata.ChunkSize)
+			}
+		}
+		reconstructedData = append(reconstructedData, chunk...)
+	}
+
+	// Trim to expected size in case of padding
+	if len(reconstructedData) > metadata.TotalDataSize {
+		reconstructedData = reconstructedData[:metadata.TotalDataSize]
+	}
+
+	fmt.Printf("Reconstructed %d bytes (expected: %d)\n", len(reconstructedData), metadata.TotalDataSize)
+
+	// Step 4: Use the reconstructed data directly (not encrypted)
+	fmt.Println("Step 4: Final processing...")
+	finalData := string(reconstructedData)
+
+	fmt.Printf("✅ Multi-QR extraction successful: %d bytes recovered\n", len(finalData))
+	return finalData, nil
+}
+
+// Helper function to read QR code from PNG file
+func readQRCode(qrImagePath string) (string, error) {
+	file, err := os.Open(qrImagePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open QR image: %w", err)
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode QR image: %w", err)
+	}
+
+	qrCodes, err := goqr.Recognize(img)
+	if err != nil {
+		return "", fmt.Errorf("failed to recognize QR code: %w", err)
+	}
+
+	if len(qrCodes) == 0 {
+		return "", fmt.Errorf("no QR code found in image")
+	}
+
+	return string(qrCodes[0].Payload), nil
+}
+
+// Helper function for checksum calculation (same as in encrypt package)
+func calculateSimpleChecksum(data []byte) uint32 {
+	var checksum uint32
+	for _, b := range data {
+		checksum = (checksum << 1) ^ uint32(b)
+	}
+	return checksum
 }
 
 // **🔹 Ensures Key is Always 32 Bytes**

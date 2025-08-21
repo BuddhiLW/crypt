@@ -1,0 +1,4 @@
+dct-strategy=multi-coefficient
+qr-data-area=1600
+qr-data-size=1024
+qr-size=40

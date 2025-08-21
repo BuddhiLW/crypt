@@ -7,6 +7,7 @@ require (
 	github.com/rwxrob/bonzai v0.56.6
 	github.com/rwxrob/bonzai/cmds/help v0.8.2
 	github.com/rwxrob/bonzai/comp v0.10.0
+	github.com/rwxrob/bonzai/futil v0.4.0
 	github.com/rwxrob/bonzai/vars v0.12.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 )
@@ -31,7 +32,6 @@ require (
 	github.com/rwxrob/bonzai/ds v0.1.1 // indirect
 	github.com/rwxrob/bonzai/edit v0.1.1 // indirect
 	github.com/rwxrob/bonzai/fn v0.9.0 // indirect
-	github.com/rwxrob/bonzai/futil v0.4.0 // indirect
 	github.com/rwxrob/bonzai/is v0.3.0 // indirect
 	github.com/rwxrob/bonzai/mark v0.12.0 // indirect
 	github.com/rwxrob/bonzai/mark/funcs v0.8.6 // indirect

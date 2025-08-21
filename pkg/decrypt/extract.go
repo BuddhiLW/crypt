@@ -5,6 +5,7 @@ package decrypt
 #cgo LDFLAGS: -ljpeg
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <jpeglib.h>
 
 // Extract QR Code from DCT Coefficients (Single Coefficient Strategy)
@@ -32,6 +33,9 @@ void extract_qr_from_dct_single(const char *input_path, unsigned char *qr_data, 
         fclose(infile);
         return;
     }
+
+    // Clear output buffer first (critical fix!)
+    memset(qr_data, 0, qr_size);
 
     // Extract QR code bits from mid-frequency DCT coefficients with stronger detection
     int bit_index = 0;
@@ -94,6 +98,9 @@ void extract_qr_from_dct_multi(const char *input_path, unsigned char *qr_data, i
         fclose(infile);
         return;
     }
+
+    // Clear output buffer first (critical fix!)
+    memset(qr_data, 0, qr_size);
 
     // Extract QR code bits from mid-frequency DCT coefficients (multi-coefficient)
     int bit_index = 0;
@@ -172,9 +179,29 @@ func ExtractQRCodeFromJPEG(inputPath string, outputQRPath string) error {
 
 	fmt.Printf("Extracting QR code with size: %dx%d (strategy: %s)\n", qrPixelSize, qrPixelSize, strategyName)
 
-	// Prepare buffer to receive QR bitstream
-	qrSize := qrPixelSize * qrPixelSize / 8 // Convert pixel dimensions to byte size
-	qrBitstream := make([]byte, qrSize)
+	// Get the actual data area from Bonzai vars (this is the critical fix!)
+	qrDataAreaStr, _ := vars.Get("QR_DATA_AREA", DCTEnv)
+	var qrDataArea int
+	if qrDataAreaStr != "" {
+		qrDataArea, err = strconv.Atoi(qrDataAreaStr)
+		if err != nil {
+			fmt.Printf("Warning: invalid QR data area in vars, falling back to data size: %v\n", err)
+			qrDataArea = qrPixelSize
+		}
+	} else {
+		// Fallback to pixel size if data area not stored
+		qrDataArea = qrPixelSize
+		fmt.Printf("Warning: QR data area not found in vars, using pixel size: %dx%d\n", qrDataArea, qrDataArea)
+	}
+
+	// Calculate the actual data size based on the data area (not full pixels)
+	qrDataSize := qrDataArea * qrDataArea / 8
+	fmt.Printf("Using QR data area: %dx%d, calculated data size: %d bytes\n", qrDataArea, qrDataArea, qrDataSize)
+
+	// Prepare buffer to receive QR bitstream - we need full pixel size for C extraction
+	// but we'll only use the data area portion for reconstruction
+	fullPixelSize := qrPixelSize * qrPixelSize / 8
+	qrBitstream := make([]byte, fullPixelSize)
 
 	// Convert input path to C string
 	cInputPath := C.CString(inputPath)
@@ -182,11 +209,18 @@ func ExtractQRCodeFromJPEG(inputPath string, outputQRPath string) error {
 
 	// Extract QR bitstream using strategy-specific CGO function (OCP - open/closed principle)
 	fmt.Println("Extracting QR Code from JPEG DCT coefficients...")
+
+	// The C function needs to know how many bits to extract, but we need to ensure
+	// we don't overflow our buffer. We'll extract the full pixel area but only
+	// use the data area portion.
+	fmt.Printf("Extracting %d bits (full pixel area) into %d-byte buffer (data area)\n",
+		fullPixelSize*8, qrDataSize)
+
 	switch strategyName {
 	case "multi-coefficient":
-		C.extract_qr_from_dct_multi(cInputPath, (*C.uchar)(unsafe.Pointer(&qrBitstream[0])), C.int(qrSize))
+		C.extract_qr_from_dct_multi(cInputPath, (*C.uchar)(unsafe.Pointer(&qrBitstream[0])), C.int(fullPixelSize))
 	default:
-		C.extract_qr_from_dct_single(cInputPath, (*C.uchar)(unsafe.Pointer(&qrBitstream[0])), C.int(qrSize))
+		C.extract_qr_from_dct_single(cInputPath, (*C.uchar)(unsafe.Pointer(&qrBitstream[0])), C.int(fullPixelSize))
 	}
 
 	// Log extracted bitstream for comparison
@@ -204,7 +238,8 @@ func ExtractQRCodeFromJPEG(inputPath string, outputQRPath string) error {
 	}
 	fmt.Printf("\n")
 
-	// Convert bitstream to QR image using the correct size
+	// Convert bitstream to QR image using the full pixel size (not just data area)
+	// The full bitstream contains all the QR code data including quiet zones
 	img, err := ConvertBitstreamToQRImage(qrBitstream, qrPixelSize)
 	if err != nil {
 		return fmt.Errorf("failed to reconstruct QR image: %w", err)

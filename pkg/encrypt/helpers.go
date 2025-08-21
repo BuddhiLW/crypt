@@ -16,6 +16,8 @@ import (
 	"github.com/rwxrob/bonzai/vars"
 )
 
+// EnhancedMultiQRCmd is defined in multi_qr_commands.go
+
 const (
 	EncryptEnv     = `ENCRYPT_ENV`
 	EncryptDataVar = `encrypted-data`
@@ -190,6 +192,7 @@ var QRCodeCmd = &bonzai.Cmd{
 	Cmds: []*bonzai.Cmd{
 		// CreateQRCmd,
 		CreateQRBinaryCmd,
+		EnhancedMultiQRCmd,
 		// DecodeQRCmd,
 		vars.Cmd.AsHidden(),
 		help.Cmd.AsHidden(),
@@ -213,8 +216,31 @@ Usages:
 - encrypt text <input> <key> qrcode binary;
 `,
 	Do: func(x *bonzai.Cmd, args ...string) error {
+		fmt.Printf("DEBUG: QRCodeCmd called with args: %v\n", args)
+		fmt.Printf("DEBUG: CreateQRBinaryCmd.Name=%s\n", CreateQRBinaryCmd.Name)
+		fmt.Printf("DEBUG: EnhancedMultiQRCmd is nil: %v\n", EnhancedMultiQRCmd == nil)
+		if EnhancedMultiQRCmd != nil {
+			fmt.Printf("DEBUG: EnhancedMultiQRCmd.Name=%s\n", EnhancedMultiQRCmd.Name)
+		}
 
-		// default:
+		// Check if we have arguments to route to subcommands
+		if len(args) > 0 {
+			fmt.Printf("DEBUG: First arg is: %s\n", args[0])
+			switch args[0] {
+			case CreateQRBinaryCmd.Name:
+				fmt.Printf("DEBUG: Routing to CreateQRBinaryCmd\n")
+				return CreateQRBinaryCmd.Do(x, args[1:]...)
+			case EnhancedMultiQRCmd.Name:
+				fmt.Printf("DEBUG: Routing to EnhancedMultiQRCmd\n")
+				fmt.Printf("DEBUG: EnhancedMultiQRCmd is nil: %v\n", EnhancedMultiQRCmd == nil)
+				if EnhancedMultiQRCmd == nil {
+					return fmt.Errorf("EnhancedMultiQRCmd is nil")
+				}
+				return EnhancedMultiQRCmd.Do(x, args[1:]...)
+			}
+		}
+
+		// default behavior if no subcommand specified
 		data := vars.Fetch(EncryptEnv, EncryptDataVar, "zoo fall")
 		// generate PNG qrcode with ECC fallback
 		_, err := WriteQRCodeWithFallback(data, 256, "/tmp/qr.png")
@@ -222,11 +248,6 @@ Usages:
 			return fmt.Errorf("failed to generate QR: %w", err)
 		}
 		fmt.Println("Wrote qrcode to /tmp/qr.png")
-
-		switch args[0] {
-		case CreateQRBinaryCmd.Name:
-			CreateQRBinaryCmd.Do(x, args[1:]...)
-		}
 		return nil
 	},
 }
@@ -366,7 +387,7 @@ Usage: encrypt text <data> <key> qrcode binary direct <input.jpg> <output.jpg>
 var EmbedCmd = &bonzai.Cmd{
 	Name:  `embed`,
 	Comp:  comp.Cmds,
-	Short: `DCT (Discrete Cosine Transform) embedding`,
+	Short: `methods to embed data into an image`,
 	Cmds: []*bonzai.Cmd{
 		DirectDCTCmd,
 		MultiQRCmd,
