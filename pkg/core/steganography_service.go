@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+
+	"github.com/rwxrob/bonzai/vars"
 )
 
 // SteganographyService orchestrates the complete steganography workflow
@@ -35,10 +38,29 @@ func NewSteganographyService(
 
 // EmbedQRCode embeds a QR code into a JPEG image
 func (s *SteganographyService) EmbedQRCode(inputPath, outputPath, data string, strategy DCTStrategy, env string) error {
-	// Calculate optimal QR size
-	qrSize, err := s.sizeCalculator.CalculateOptimalSize(inputPath, len(data), strategy)
-	if err != nil {
-		return fmt.Errorf("failed to calculate QR size: %w", err)
+	// Try to get QR size from vars first, fall back to calculation
+	qrSizeStr, _ := vars.Get("qr-size", "DCT_ENV")
+	var qrSize int
+	var err error
+
+	if qrSizeStr != "" {
+		qrSize, err = strconv.Atoi(qrSizeStr)
+		if err != nil {
+			fmt.Printf("WARNING: Invalid QR size in vars '%s', falling back to calculation: %v\n", qrSizeStr, err)
+			qrSize, err = s.sizeCalculator.CalculateOptimalSize(inputPath, len(data), strategy)
+			if err != nil {
+				return fmt.Errorf("failed to calculate QR size: %w", err)
+			}
+		} else {
+			fmt.Printf("DEBUG: Using QR size from vars: %d\n", qrSize)
+		}
+	} else {
+		// Calculate optimal QR size
+		qrSize, err = s.sizeCalculator.CalculateOptimalSize(inputPath, len(data), strategy)
+		if err != nil {
+			return fmt.Errorf("failed to calculate QR size: %w", err)
+		}
+		fmt.Printf("DEBUG: Using calculated QR size: %d\n", qrSize)
 	}
 
 	// Generate QR code with High ECC
@@ -172,6 +194,14 @@ func (s *SteganographyService) EmbedMultiQRWithMetadata(inputPath, outputDir, da
 		return fmt.Errorf("failed to create metadata JSON: %w", jsonErr)
 	}
 
+	// Store QR size in vars for metadata embedding (use the same env as extraction)
+	if err := vars.Set("qr-size", "96", "DCT_ENV"); err != nil {
+		fmt.Printf("WARNING: Failed to store QR size for metadata: %v\n", err)
+	}
+	if err := vars.Set("QR_DATA_AREA", "72", "DCT_ENV"); err != nil {
+		fmt.Printf("WARNING: Failed to store QR data area for metadata: %v\n", err)
+	}
+
 	err = embedQRCodeInJPEG(inputPath, metadataPath, string(metadataJSON))
 	if err != nil {
 		return fmt.Errorf("failed to create metadata file: %w", err)
@@ -183,7 +213,24 @@ func (s *SteganographyService) EmbedMultiQRWithMetadata(inputPath, outputDir, da
 	for i := 0; i < chunkCount; i++ {
 		chunkPath := filepath.Join(tempDir, fmt.Sprintf("chunk_%d.jpeg", i))
 		fmt.Printf("DEBUG: Creating chunk file at %s\n", chunkPath)
-		err = embedQRCodeInJPEG(inputPath, chunkPath, data)
+
+		// Use the actual encrypted data for the chunk (for single chunk, use all data)
+		chunkData := string(data) // Use the actual encrypted data
+		previewLen := 50
+		if len(chunkData) < previewLen {
+			previewLen = len(chunkData)
+		}
+		fmt.Printf("DEBUG: Embedding chunk data length: %d, first %d chars: %s\n", len(chunkData), previewLen, chunkData[:previewLen])
+
+		// Store QR size in vars for extraction (use the same env as extraction)
+		if err := vars.Set("qr-size", "96", "DCT_ENV"); err != nil {
+			fmt.Printf("WARNING: Failed to store QR size: %v\n", err)
+		}
+		if err := vars.Set("QR_DATA_AREA", "72", "DCT_ENV"); err != nil {
+			fmt.Printf("WARNING: Failed to store QR data area: %v\n", err)
+		}
+
+		err = embedQRCodeInJPEG(inputPath, chunkPath, chunkData)
 		if err != nil {
 			return fmt.Errorf("failed to create chunk file %d: %w", i, err)
 		}

@@ -1,0 +1,5 @@
+QR_DATA_AREA=72
+QR_DATA_SIZE=1152
+QR_SIZE=96
+dct-strategy=single-coefficient
+qr-size=96

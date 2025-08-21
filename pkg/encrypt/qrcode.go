@@ -253,8 +253,8 @@ int embed_qr_in_dct_single(const char *input_path, const char *output_path, unsi
         for (JDIMENSION bx = 0; bx < cinfo.comp_info[0].width_in_blocks && bit_index < required_bits; bx++) {
             unsigned char bit = (qr_data[bit_index / 8] >> (7 - (bit_index % 8))) & 1;
 
-            // Use low-frequency coefficient (position 1) for better robustness
-            int dct_pos = 1;
+            			// Use low-frequency coefficient (position 1) for better robustness
+			int dct_pos = 1;
 
             // Simple LSB embedding (traditional approach) with logging
             int original_coeff = block_row[0][bx][dct_pos];
@@ -422,6 +422,8 @@ int test_dct_embedding(const char *input_path, const char *output_path, unsigned
         return embed_qr_in_dct_single(input_path, output_path, data, data_size);
     }
 }
+
+
 
 // Test function for direct DCT extraction (for unit tests)
 void test_dct_extraction(const char *input_path, unsigned char *data, int data_size, int multi_coeff) {
@@ -615,13 +617,17 @@ func ExtractBitstreamFromPNG(pngData []byte) ([]byte, error) {
 
 			// Black (dark) pixels are '1', white (light) pixels are '0'
 			if pixel < 128 {
-				bitstream[bitIndex/8] |= 1 << (7 - (bitIndex % 8))
+				byteIndex := bitIndex / 8
+				bitPos := 7 - (bitIndex % 8)
+				oldByte := bitstream[byteIndex]
+				bitstream[byteIndex] |= 1 << bitPos
+				newByte := bitstream[byteIndex]
 				blackPixels++
 
 				// Debug first 16 black pixels
 				if blackPixels <= 16 {
-					fmt.Printf("Black pixel %d at (%d,%d): intensity=%d, bitIndex=%d, byteIndex=%d, bitPos=%d\n",
-						blackPixels, x, y, pixel, bitIndex, bitIndex/8, 7-(bitIndex%8))
+					fmt.Printf("Black pixel %d at (%d,%d): intensity=%d, bitIndex=%d, byteIndex=%d, bitPos=%d, byte: 0x%02x -> 0x%02x\n",
+						blackPixels, x, y, pixel, bitIndex, byteIndex, bitPos, oldByte, newByte)
 				}
 			} else {
 				whitePixels++
@@ -632,6 +638,13 @@ func ExtractBitstreamFromPNG(pngData []byte) ([]byte, error) {
 
 	fmt.Printf("PNG conversion: %dx%d, black pixels: %d, white pixels: %d\n",
 		width, height, blackPixels, whitePixels)
+
+	// Debug: Check first few bytes of bitstream
+	fmt.Printf("Bitstream first 10 bytes after conversion: ")
+	for i := 0; i < 10 && i < len(bitstream); i++ {
+		fmt.Printf("%02x ", bitstream[i])
+	}
+	fmt.Printf("\n")
 
 	return bitstream, nil
 }
@@ -684,9 +697,16 @@ func EmbedQRCodeInJPEG(inputPath, outputPath, qrData string, payloadSize int) er
 	actualQRSize := img.Bounds().Dx() // Assume square QR code
 	fmt.Printf("Actual QR code size: %dx%d\n", actualQRSize, actualQRSize)
 
-	// Log first few bytes of bitstream for debugging
+	// Log first few bytes of bitstream for debugging (should be mostly zeros due to quiet zones)
 	fmt.Printf("QR bitstream first 10 bytes: ")
 	for i := 0; i < 10 && i < len(bitstream); i++ {
+		fmt.Printf("%02x ", bitstream[i])
+	}
+	fmt.Printf("\n")
+
+	// Log bytes around where we expect data (around byte 109 based on debug output)
+	fmt.Printf("QR bitstream bytes 109-119: ")
+	for i := 109; i < 120 && i < len(bitstream); i++ {
 		fmt.Printf("%02x ", bitstream[i])
 	}
 	fmt.Printf("\n")

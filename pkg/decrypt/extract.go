@@ -46,8 +46,8 @@ void extract_qr_from_dct_single(const char *input_path, unsigned char *qr_data, 
         for (JDIMENSION bx = 0; bx < cinfo.comp_info[0].width_in_blocks; bx++) {
             if (bit_index >= qr_size * 8) break;  // Stop when enough bits are extracted
 
-            // Extract LSB from low-frequency coefficient for better robustness
-            int dct_pos = 1; // Low-frequency coefficient
+            			// Extract LSB from low-frequency coefficient for better robustness
+			int dct_pos = 1; // Low-frequency coefficient
             int coeff_value = block_row[0][bx][dct_pos];
             unsigned char bit = coeff_value & 1; // Extract LSB
 
@@ -226,6 +226,13 @@ func ExtractQRCodeFromJPEG(inputPath string, outputQRPath string) error {
 	// Log extracted bitstream for comparison
 	fmt.Printf("Extracted bitstream first 10 bytes: ")
 	for i := 0; i < 10 && i < len(qrBitstream); i++ {
+		fmt.Printf("%02x ", qrBitstream[i])
+	}
+	fmt.Printf("\n")
+
+	// Log bytes around where we expect QR data (around byte 109 based on embedding output)
+	fmt.Printf("Extracted bitstream bytes 109-119: ")
+	for i := 109; i < 120 && i < len(qrBitstream); i++ {
 		fmt.Printf("%02x ", qrBitstream[i])
 	}
 	fmt.Printf("\n")
